@@ -9,7 +9,7 @@ y = torch.rand(10, 10).to(device)
 z = x @ y
 # --- end: torch setup ---
 
-# Initialize the pipeline once at startup (left as-is)
+
 model_id = "openai/gpt-oss-20b"
 pipe = pipeline(
     "text-generation",
@@ -18,7 +18,7 @@ pipe = pipeline(
     device_map="cuda",
 )
 
-# --- Flask app replacing FastAPI ---
+
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -41,5 +41,5 @@ def get_response():
     return jsonify({"response": generated_text})
 
 if __name__ == "__main__":
-    # Start Flask server
+
     app.run(host="0.0.0.0", port=8000)
