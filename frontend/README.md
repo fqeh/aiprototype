@@ -1,5 +1,32 @@
-# Vue 3 + Vite
+# Chat Playground
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+A tiny chat UI built with Vue 3, Vite, and Vuetify that connects to a Flask backend API at `/api/v1/???`.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+---
+
+## Prerequisites
+
+- **Node.js** ≥ 18 and **npm** (or **pnpm**/**yarn**)  
+- **Python** ≥ 3.10 for the Flask backend  
+- (Optional) **Git**
+
+---
+
+## Quick Start
+
+### 1) Clone and enter the project
+```bash
+git clone https://github.com/fqeh/aiprototype.git
+cd frontend
+```
+
+
+### 2) Install frontend dependencies
+```bash
+npm install
+```
+
+### 3) Run the project
+```bash
+npm run dev
+```
