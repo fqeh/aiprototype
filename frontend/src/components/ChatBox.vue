@@ -71,7 +71,7 @@
                   <v-sheet
                     v-if="!m.editing"
                     class="pa-3 bubble outlined-2 r6"
-                    :class="m.role === 'user' ? 'bubble-user' : 'bubble-assistant'"
+                    :class="m.role === 'user' ? 'bubble-user' : 'bubble-assistant'"x
                     max-width="80%"
                     variant="outlined"
                   >
