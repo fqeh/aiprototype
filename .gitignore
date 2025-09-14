@@ -1,2 +1,3 @@
 proxy_server/.env
 proxy_server/db_info.txt
+frontend/package-lock.json

@@ -21,18 +21,19 @@ MONGO_URI = os.getenv("MONGO_URI")
 DB_NAME = os.getenv("DB_NAME")
 USERS_COLLECTION = os.getenv("USERS_COLLECTION")
 API_KEYS_COLLECTION = os.getenv("API_KEYS_COLLECTION")
+MODELS_COLLECTION = os.getenv("MODELS_COLLECTION")
 
 LLM_SERVER_BASE = os.getenv("LLM_SERVER_BASE")
 LLM_SERVER_ENDPOINT = os.getenv("LLM_SERVER_ENDPOINT")
-CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT"))
-READ_TIMEOUT = float(os.getenv("READ_TIMEOUT"))
-PORT = int(os.getenv("PORT"))
+CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "5"))
+READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "60"))
+PORT = int(os.getenv("PORT", "5000"))
 
 # allow requests without API key for testing
 ALLOW_NO_API_KEY_FOR_TESTS = os.getenv("ALLOW_NO_API_KEY_FOR_TESTS", "true").lower() == "true"
 
 # Flask secrets (session cookies)
-SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
+SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 # ---------------- App + DB ----------------
 app = Flask(__name__)
@@ -42,11 +43,14 @@ mongo_client = MongoClient(MONGO_URI, uuidRepresentation="standard")
 db = mongo_client[DB_NAME]
 users = db[USERS_COLLECTION]
 api_keys = db[API_KEYS_COLLECTION]
+models_col = db[MODELS_COLLECTION]
 
 # helpful indexes (safe to run multiple times)
 users.create_index("email", unique=True)
 api_keys.create_index("user_id")
 api_keys.create_index("key_id")
+models_col.create_index("name", unique=True)
+models_col.create_index("model_id", unique=True)
 
 # ---------------- Flask-Login ----------------
 login_manager = LoginManager()
@@ -108,8 +112,15 @@ def _serialize_user_doc(doc):
         "email": doc.get("email")
     }
 
+def _serialize_model_doc(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name"),
+        "model_id": doc.get("model_id"),
+    }
+
 # ---------------- Auth Endpoints ----------------
-@app.post("/signup")
+@app.post("/api/signup")
 def signup():
     """
     Body: { "email": "...", "password": "..." }
@@ -158,7 +169,7 @@ def signup():
         "api_key": api_key_plain  # show only once now; never store plaintext
     }), 201
 
-@app.post("/login")
+@app.post("/api/login")
 def login():
     """
     Body: { "email": "...", "password": "..." }
@@ -183,20 +194,31 @@ def login():
     login_user(_user_from_doc(doc))
     return jsonify({"message": "login successful", "user": _serialize_user_doc(doc)}), 200
 
-@app.post("/logout")
+@app.post("/api/logout")
 @login_required
 def logout():
     logout_user()
     return jsonify({"message": "logged out"}), 200
 
-@app.get("/me")
+@app.get("/api/me")
 def me():
     if current_user.is_authenticated:
         return jsonify({"authenticated": True, "user": {"id": current_user.id, "email": getattr(current_user, "email", None)}})
     return jsonify({"authenticated": False})
 
+# ---------------- Models Endpoint ----------------
+@app.get("/api/models")
+def list_models():
+    """
+    Returns all available models from the models collection.
+    Response: { "models": [ { "id": "...", "name": "...", "model_id": "..." }, ... ] }
+    """
+    cursor = models_col.find({}, projection={"name": 1, "model_id": 1})
+    items = [_serialize_model_doc(d) for d in cursor]
+    return jsonify({"models": items}), 200
+
 # ---------------- Existing Proxy (UNCHANGED) ----------------
-@app.get("/healthz")
+@app.get("/api/healthz")
 def healthz():
     return jsonify({"status": "ok"}), 200
 
