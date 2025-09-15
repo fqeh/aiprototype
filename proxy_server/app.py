@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------- Config ----------------
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_USER = os.getenv("MONGO_USER")
+MONGO_PASS = os.getenv("MONGO_PASS")
 DB_NAME = os.getenv("DB_NAME")
 USERS_COLLECTION = os.getenv("USERS_COLLECTION")
 API_KEYS_COLLECTION = os.getenv("API_KEYS_COLLECTION")
@@ -39,7 +40,13 @@ SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-mongo_client = MongoClient(MONGO_URI, uuidRepresentation="standard")
+mongo_client = MongoClient(
+    "mongodb://localhost:27090/Team309",
+    username=MONGO_USER,
+    password=MONGO_PASS,
+    authSource="Team309",
+    uuidRepresentation="standard",
+)
 db = mongo_client[DB_NAME]
 users = db[USERS_COLLECTION]
 api_keys = db[API_KEYS_COLLECTION]

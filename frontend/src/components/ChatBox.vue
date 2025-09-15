@@ -234,7 +234,7 @@
       </v-card>
     </v-dialog>
 
-    <v-snackbar v-model="snack.open" :timeout="2200" class="outlined-2 r6">
+    <v-snackbar v-model="snack.open" :timeout="3000" class="outlined-2 r6">
       {{ snack.text }}
     </v-snackbar>
   </v-app>
@@ -263,19 +263,19 @@ function normalizeTrailingSlash(u) {
 }
 function computeApiBase() {
   const raw = import.meta.env.VITE_API_BASE_URL && String(import.meta.env.VITE_API_BASE_URL).trim()
-  // If env is absolute (http/https), use as-is
   if (raw && /^https?:\/\//i.test(raw)) return normalizeTrailingSlash(raw)
-  // If env is a relative path, resolve against origin
   if (raw) {
-    const rel = raw.replace(/^\/+/, '') // strip leading slashes
+    const rel = raw.replace(/^\/+/, '')
     return normalizeTrailingSlash(new URL(rel, window.location.origin + '/').href)
   }
-  // Fallback: origin + BASE_URL + 'api/'
-  const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '/') // e.g. '/aiprototype/'
+  const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '/')
   return normalizeTrailingSlash(new URL('api/', window.location.origin + baseUrl).href)
 }
 const API_BASE = computeApiBase()
-const api = axios.create({ baseURL: API_BASE, headers: { 'Content-Type': 'application/json' } })
+const api = axios.create({
+  baseURL: API_BASE,
+  headers: { 'Content-Type': 'application/json' }
+})
 
 /* ── State ──────────────────────────────────────────────────────────── */
 const llmOptions = ref([])                // loaded from /api/models
@@ -346,16 +346,34 @@ function cancelEdit(i) {
   editBuffer.value = ''
 }
 
+/* Remove the latest assistant reply (UI + memory) */
+function removeLastAssistant() {
+  for (let k = messages.value.length - 1; k >= 0; k--) {
+    if (messages.value[k].role === 'assistant') {
+      messages.value.splice(k, 1)
+      return true
+    }
+  }
+  return false
+}
+
 async function confirmEdit(i) {
   const msg = visibleMessages.value[i]
   if (!msg) return
+
+  // Update the edited user message
   msg.content = editBuffer.value.trim() || msg.content
   msg.editing = false
   editingIndex.value = -1
   editBuffer.value = ''
+
+  // Remove the most recent assistant response before re-querying
+  removeLastAssistant()
+
   await nextTick()
   maybeScrollToBottom()
-  // Per requirement: pressing OK sends a request
+
+  // Send new request after editing
   await callLLM()
 }
 
@@ -376,6 +394,27 @@ async function sendDraft() {
   await callLLM()
 }
 
+/* Extract a readable error string from Axios error/response */
+function extractErrorMessage(err) {
+  // Prefer server-provided body
+  if (err?.response) {
+    const { status, statusText, data } = err.response
+    // JSON body with {error: "..."} or similar
+    if (data && typeof data === 'object') {
+      const keys = ['error', 'message', 'detail', 'msg']
+      for (const k of keys) if (data[k]) return String(data[k])
+      // Fallback to JSON pretty print
+      try { return JSON.stringify(data) } catch { /* noop */ }
+    }
+    // Plain text body
+    if (typeof data === 'string' && data.trim()) return data
+    // Otherwise compose from status
+    return `HTTP ${status}${statusText ? ` ${statusText}` : ''}`
+  }
+  // Network/timeout or unknown error
+  return err?.message || 'Request failed.'
+}
+
 async function callLLM() {
   if (!model.value) {
     snack.value = { open: true, text: 'Please select a model first.' }
@@ -394,9 +433,10 @@ async function callLLM() {
     messages.value.push({ role: 'assistant', content: String(answer || 'OK.') })
     await nextTick()
     maybeScrollToBottom()
-  } catch (e) {
-    console.error(e)
-    messages.value.push({ role: 'assistant', content: 'Sorry, something went wrong.' })
+  } catch (err) {
+    // If Flask returned 502 (or any error), show its message instead of a generic string
+    const msg = extractErrorMessage(err)
+    messages.value.push({ role: 'assistant', content: msg })
   } finally {
     busy.value = false
   }
@@ -452,7 +492,6 @@ async function loadModels() {
       pendingModel.value = model.value
     }
   } catch (err) {
-    console.error('Failed to load models:', err)
     snack.value = { open: true, text: 'Could not load models. Using fallback.' }
     llmOptions.value = [
       { label: 'GPT (fallback)', value: 'gpt' },
