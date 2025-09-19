@@ -22,7 +22,7 @@ z = x @ y
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Model dictionary - Solo modelos Qwen
+# Model dictionary
 MODELS = {
     "1": {
         "name": "Qwen 2.5 1.5B Instruct",
@@ -35,8 +35,93 @@ MODELS = {
         "id": "Qwen/Qwen2.5-0.5B-Instruct",
         "description": "Qwen's smallest model, fast and lightweight",
         "size": "~1GB"
+    },
+    "3": {
+        "name": "Gemma 3 4B IT",
+        "id": "google/gemma-3-4b-it",
+        "description": "Google's efficient 2B instruction-tuned model",
+        "size": "~4GB"
+    },
+    "4": {
+        "name": "GPT OSS 20B",
+        "id": "openai/gpt-oss-20b",
+        "description": "OpenAI's open-source 20B parameter model",
+        "size": "~40GB"
+    },
+    "5": {
+        "name": "Meta Llama 3.1 8B Instruct",
+        "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "description": "Meta's instruction-tuned 8B parameter model",
+        "size": "~16GB"
     }
 }
+
+def process_prompt_format(data):
+    """
+    Processes different prompt formats and converts them to simple text
+    """
+    prompt_data = data.get("prompt", "")
+
+    # Simple format: "prompt": "hello"
+    if isinstance(prompt_data, str):
+        return prompt_data.strip()
+
+    # Complex format: "prompt": [{"role": "user", "prompts": "hello"}]
+    elif isinstance(prompt_data, list):
+        if len(prompt_data) == 0:
+            return ""
+
+        # Process list of messages
+        processed_parts = []
+        for item in prompt_data:
+            if isinstance(item, dict):
+                # Extract prompt content
+                content = item.get("prompts", "") or item.get("content", "") or item.get("message", "")
+                role = item.get("role", "")
+
+                if content:
+                    if role:
+                        processed_parts.append(f"{role}: {content}")
+                    else:
+                        processed_parts.append(content)
+
+        return "\n".join(processed_parts).strip()
+
+    # Object format: "prompt": {"content": "hello"}
+    elif isinstance(prompt_data, dict):
+        content = prompt_data.get("prompts", "") or prompt_data.get("content", "") or prompt_data.get("message", "")
+        return content.strip()
+
+    return ""
+
+def map_external_model_to_internal(external_model):
+    """
+    Maps external models to internal available ones
+    """
+    model_mappings = {
+        "meta-llama/Llama-3.1-8B": "5",  # Map to new Meta Llama model
+        "meta-llama/Meta-Llama-3.1-8B-Instruct": "5",  # Direct mapping
+        "llama-3.1": "5",
+        "llama-3.1-8b": "5",
+        "llama": "5",
+        "qwen-1.5b": "1",
+        "qwen-0.5b": "2",
+        "small": "2",
+        "large": "5"  # Changed from "1" to "5" for larger model
+    }
+
+    # Search for exact mapping
+    if external_model in model_mappings:
+        return model_mappings[external_model]
+
+    # Search for partial mapping
+    external_lower = external_model.lower()
+    for external_key, internal_key in model_mappings.items():
+        if external_key.lower() in external_lower:
+            return internal_key
+
+    # Default to model 5 (Meta Llama 3.1 8B) instead of model 1
+    return "5"
 
 class ModelManager:
     """Manages multiple models and request queues"""
@@ -47,7 +132,7 @@ class ModelManager:
         self.locks = {}   # {model_id: threading.Lock()}
         self.processing_counts = {}  # {model_id: int}
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
-        self.hf_token = "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"
+        self.hf_token = ""
 
     def load_model(self, model_id):
         """Load a model if not already loaded"""
@@ -141,7 +226,7 @@ def select_models():
         print(f"    {model['description']}")
 
     while True:
-        choice = input("\nSelect option (1/2/q): ").strip()
+        choice = input("\nSelect option (1/2/3/4/5/q): ").strip()
 
         if choice.lower() == 'q':
             print("Exiting...")
@@ -151,8 +236,14 @@ def select_models():
             return [MODELS["1"]["id"]]
         elif choice == "2":
             return [MODELS["2"]["id"]]
+        elif choice == "3":
+            return [MODELS["3"]["id"]]
+        elif choice == "4":
+            return [MODELS["4"]["id"]]
+        elif choice == "5":
+            return [MODELS["5"]["id"]]
         else:
-            print("[ERROR] Invalid choice. Please select 1, 2 or q")
+            print("[ERROR] Invalid choice. Please select 1, 2, 3, 4, 5 or q")
 
 # Initialize model manager
 model_manager = ModelManager(max_workers=2)
@@ -178,37 +269,120 @@ app.config['JSON_AS_ASCII'] = False
 request_counter = 0
 request_lock = threading.Lock()
 
-@app.post("/get-response/")
+@app.route("/get-response/", methods=["POST", "GET"])
+@app.route("/get-response", methods=["POST", "GET"])
 def get_response():
     global request_counter
 
-    data = request.get_json(silent=True) or {}
-    prompt = data.get("prompt", "")
-    max_new_tokens = int(data.get("max_new_tokens", 256))
-    model_key = data.get("model_key", "")
+    # Handle GET requests
+    if request.method == "GET":
+        return jsonify({
+            "error": "Method not allowed",
+            "message": "This endpoint requires POST method",
+            "supported_formats": [
+                {
+                    "simple": {
+                        "prompt": "Hello world",
+                        "model_key": "5",
+                        "max_new_tokens": 100
+                    }
+                },
+                {
+                    "complex": {
+                        "prompt": [{"role": "user", "prompts": "Hello world"}],
+                        "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+                        "max_new_tokens": 100
+                    }
+                }
+            ]
+        }), 405
 
-    # Determine model to use
-    if model_key and model_key in MODELS:
+    # Validate Content-Type
+    if not request.is_json:
+        return jsonify({
+            "error": "Invalid Content-Type",
+            "message": "Content-Type must be application/json",
+            "received": request.content_type or "None"
+        }), 400
+
+    # Parse JSON
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Empty JSON body"}), 400
+    except Exception as e:
+        return jsonify({
+            "error": "Invalid JSON",
+            "message": str(e)
+        }), 400
+
+    # Process prompt (handles both simple and complex formats)
+    try:
+        prompt = process_prompt_format(data)
+        if not prompt:
+            return jsonify({
+                "error": "Missing or invalid prompt",
+                "message": "Prompt is required. Supported formats: string, array of objects with 'prompts' field",
+                "received": data.get("prompt")
+            }), 400
+    except Exception as e:
+        return jsonify({
+            "error": "Prompt processing error",
+            "message": str(e),
+            "received": data.get("prompt")
+        }), 400
+
+    # Handle max_new_tokens
+    max_new_tokens = data.get("max_new_tokens", data.get("max_tokens", 256))
+    try:
+        max_new_tokens = int(max_new_tokens)
+        if max_new_tokens <= 0 or max_new_tokens > 2048:
+            raise ValueError("Must be between 1 and 2048")
+    except (ValueError, TypeError):
+        max_new_tokens = 256  # Default fallback
+
+    # Determine model (handle both internal and external model references)
+    model_key = None
+    model_id = None
+
+    # Check for internal model_key first
+    if "model_key" in data:
+        model_key = str(data["model_key"]).strip()
+        if model_key in MODELS:
+            model_id = MODELS[model_key]["id"]
+
+    # Check for external model reference
+    elif "model" in data:
+        external_model = str(data["model"]).strip()
+        model_key = map_external_model_to_internal(external_model)
         model_id = MODELS[model_key]["id"]
-    else:
-        model_id = data.get("model", None)
-        if not model_id:
-            # Use first loaded model as default
-            model_id = list(model_manager.models.keys())[0] if model_manager.models else None
+        logger.info(f"Mapped external model '{external_model}' to internal model_key '{model_key}' ({model_id})")
+
+    # Fallback to first available model
+    if not model_id and model_manager.models:
+        model_id = list(model_manager.models.keys())[0]
+        model_key = "5"  # Default to Meta Llama instead of "1"
 
     if not model_id:
-        return jsonify({"error": "No model specified or loaded"}), 400
+        return jsonify({
+            "error": "No model available",
+            "available_models": {k: v["name"] for k, v in MODELS.items()},
+            "message": "No models are currently loaded"
+        }), 500
 
     if model_id not in model_manager.models:
-        return jsonify({"error": f"Model {model_id} not loaded. Available: {list(model_manager.models.keys())}"}), 400
-
-    if not prompt:
-        return jsonify({"error": "Field 'prompt' is required."}), 400
+        return jsonify({
+            "error": "Model not loaded",
+            "requested": model_id,
+            "loaded_models": list(model_manager.models.keys())
+        }), 400
 
     # Generate unique request ID
     with request_lock:
         request_counter += 1
         request_id = f"req_{request_counter}_{datetime.now().strftime('%H%M%S')}"
+
+    logger.info(f"Processing request {request_id}: model={model_id}, prompt_length={len(prompt)}")
 
     # Create response container
     response_container = {"ready": False, "data": None}
@@ -217,34 +391,50 @@ def get_response():
         response_container["data"] = result
         response_container["ready"] = True
 
-    # Add request to queue
-    queue_position = model_manager.add_request(model_id, prompt, max_new_tokens, callback, request_id)
+    try:
+        queue_position = model_manager.add_request(model_id, prompt, max_new_tokens, callback, request_id)
 
-    # Send queue notification if needed
-    if queue_position > 1:
-        logger.info(f"Request queued: {request_id} (Position: {queue_position})")
+        timeout = 300
+        start_time = time.time()
 
-    # Wait for response (with timeout)
-    timeout = 300  # 5 minutes
-    start_time = time.time()
+        while not response_container["ready"]:
+            if time.time() - start_time > timeout:
+                return jsonify({
+                    "error": "Request timeout",
+                    "request_id": request_id
+                }), 504
+            time.sleep(0.1)
 
-    while not response_container["ready"]:
-        if time.time() - start_time > timeout:
-            return jsonify({"error": "Request timeout", "request_id": request_id}), 504
-        time.sleep(0.1)
+        result = response_container["data"]
 
-    result = response_container["data"]
+        if result["success"]:
+            wait_time = round(time.time() - start_time, 2)
+            logger.info(f"Request {request_id} completed in {wait_time}s")
 
-    if result["success"]:
+            return jsonify({
+                "response": result["response"],
+                "model": model_id,
+                "model_name": MODELS.get(model_key, {}).get("name", model_id),
+                "original_model_request": data.get("model", model_key),
+                "request_id": request_id,
+                "wait_time": wait_time,
+                "queue_position": queue_position,
+                "prompt_length": len(prompt),
+                "response_length": len(result["response"])
+            })
+        else:
+            return jsonify({
+                "error": "Model processing failed",
+                "details": result["error"],
+                "request_id": request_id
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error for request {request_id}: {str(e)}")
         return jsonify({
-            "response": result["response"],
-            "model": model_id,
-            "request_id": request_id,
-            "wait_time": round(time.time() - start_time, 2),
-            "queue_position": queue_position
-        })
-    else:
-        return jsonify({"error": result["error"], "request_id": request_id}), 500
+            "error": "Internal server error",
+            "request_id": request_id
+        }), 500
 
 @app.get("/status/")
 def get_status():
@@ -270,7 +460,7 @@ def home():
     
     <h2>Available Endpoints:</h2>
     <ul>
-        <li>POST /get-response/ - Generate text (specify model_key: "1" or "2")</li>
+        <li>POST /get-response/ - Generate text (specify model_key: "1", "2", "3", "4", or "5")</li>
         <li>GET /status/ - Check server status</li>
     </ul>
     
@@ -278,16 +468,24 @@ def home():
     <ul>
         {models_html}
     </ul>
-    <h3>Example Usage:</h3>
+    
+    <h3>Supported Formats:</h3>
+    <h4>Simple Format:</h4>
     <pre>
     curl -X POST http://0.0.0.0:5001/get-response/ \\
       -H "Content-Type: application/json" \\
-      -d '{{"prompt": "Hello", "model_key": "1", "max_new_tokens": 50}}'
+      -d '{{"prompt": "Hello", "model_key": "5", "max_new_tokens": 50}}'
+    </pre>
+    
+    <h4>Complex Format:</h4>
+    <pre>
+    curl -X POST http://0.0.0.0:5001/get-response/ \\
+      -H "Content-Type: application/json" \\
+      -d '{{"prompt": [{{"role": "user", "prompts": "Hello"}}], "model": "meta-llama/Meta-Llama-3.1-8B-Instruct", "max_new_tokens": 50}}'
     </pre>
     """
 
 if __name__ == "__main__":
-    # Fixed port 5001
     PORT = 5001
 
     print(f"\n" + "="*60)
@@ -300,6 +498,12 @@ if __name__ == "__main__":
     print(f"\nAPI Usage:")
     print(f'  Use model_key="1" for Qwen 1.5B')
     print(f'  Use model_key="2" for Qwen 0.5B')
+    print(f'  Use model_key="3" for gemma-3-4b-it')
+    print(f'  Use model_key="4" for gpt-oss-20b')
+    print(f'  Use model_key="5" for Meta-Llama-3.1-8B-Instruct')
+    print(f"\nSupported prompt formats:")
+    print(f'  Simple: {{"prompt": "Hello world"}}')
+    print(f'  Complex: {{"prompt": [{{"role": "user", "prompts": "Hello world"}}]}}')
     print(f"="*60 + "\n")
 
     app.run(host="0.0.0.0", port=PORT, threaded=True)
